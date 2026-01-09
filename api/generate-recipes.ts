@@ -41,23 +41,11 @@ export default async function handler(req: Request): Promise<Response> {
       );
     }
 
-    const SPOONACULAR_API_KEY = process.env.SPOONACULAR_API_KEY;
+    const USDA_API_KEY = process.env.USDA_API_KEY;
 
-    if (!SPOONACULAR_API_KEY) {
-      console.error("SPOONACULAR_API_KEY is not configured");
-      return new Response(
-        JSON.stringify({
-          error:
-            "Tarif servisi yapılandırılmamış. Lütfen SPOONACULAR_API_KEY ortam değişkenini ayarlayın.",
-        }),
-        {
-          status: 500,
-          headers: {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
-          },
-        },
-      );
+    if (!USDA_API_KEY) {
+      console.error("USDA_API_KEY is not configured");
+      // Makrolar eksik olsa bile tarifleri gösterebilmek için burada hata fırlatmıyoruz.
     }
 
     const userIngredientsList = ingredients
@@ -66,66 +54,33 @@ export default async function handler(req: Request): Promise<Response> {
       .map((i: string) => i.trim())
       .filter((i: string) => i);
 
-    console.log(
-      "Calling Spoonacular API with ingredients:",
-      userIngredientsList.join(", "),
-    );
-
-    // 1) Kullanıcı malzemeleriyle tarif ID'lerini ve temel bilgileri al
-    const searchUrl = new URL(
-      "https://api.spoonacular.com/recipes/findByIngredients",
-    );
-    searchUrl.searchParams.append("apiKey", SPOONACULAR_API_KEY);
-    searchUrl.searchParams.append("ingredients", userIngredientsList.join(","));
-    searchUrl.searchParams.append("number", "4"); // En fazla 4 tarif
-    searchUrl.searchParams.append("ranking", "1");
-    searchUrl.searchParams.append("ignorePantry", "true");
-
-    const response = await fetch(searchUrl.toString());
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(
-        "Spoonacular API error (findByIngredients):",
-        response.status,
-        errorText,
-      );
-
-      if (response.status === 429) {
-        return new Response(
-          JSON.stringify({
-            error: "Çok fazla istek gönderildi. Lütfen biraz bekleyin.",
-          }),
-          {
-            status: 429,
-            headers: {
-              "Content-Type": "application/json",
-              "Access-Control-Allow-Origin": "*",
-            },
-          },
-        );
-      }
-
-      if (response.status === 401 || response.status === 403) {
-        return new Response(
-          JSON.stringify({
-            error:
-              "Tarif servisi yetkilendirme hatası. API anahtarını kontrol edin.",
-          }),
-          {
-            status: 401,
-            headers: {
-              "Content-Type": "application/json",
-              "Access-Control-Allow-Origin": "*",
-            },
-          },
-        );
-      }
-
+    const firstIngredient = userIngredientsList[0];
+    if (!firstIngredient) {
       return new Response(
-        JSON.stringify({
-          error: "Tarif servisi hatası (findByIngredients)",
-        }),
+        JSON.stringify({ error: "Lütfen en az bir malzeme girin" }),
+        {
+          status: 400,
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+          },
+        },
+      );
+    }
+
+    console.log("Calling TheMealDB with ingredient:", firstIngredient);
+
+    // 1) TheMealDB: ilk malzemeye göre tarif listesi
+    const filterUrl = `https://www.themealdb.com/api/json/v1/1/filter.php?i=${encodeURIComponent(
+      firstIngredient,
+    )}`;
+
+    const filterRes = await fetch(filterUrl);
+    if (!filterRes.ok) {
+      const txt = await filterRes.text();
+      console.error("TheMealDB filter error:", filterRes.status, txt);
+      return new Response(
+        JSON.stringify({ error: "Tarif servisi hatası (TheMealDB filter)" }),
         {
           status: 500,
           headers: {
@@ -136,13 +91,12 @@ export default async function handler(req: Request): Promise<Response> {
       );
     }
 
-    const data = await response.json();
-
-    if (!Array.isArray(data) || data.length === 0) {
+    const filterData = await filterRes.json();
+    if (!filterData.meals || !Array.isArray(filterData.meals) || filterData.meals.length === 0) {
       return new Response(
         JSON.stringify({
           error:
-            "Bu malzemelerle tarif bulunamadı. Farklı malzemeler deneyin.",
+            "Bu malzemeyle TheMealDB üzerinde tarif bulunamadı. Farklı malzemeler deneyin.",
         }),
         {
           status: 404,
@@ -154,113 +108,156 @@ export default async function handler(req: Request): Promise<Response> {
       );
     }
 
-    // 2) Her tarif için detay ve besin bilgilerini al
-    const recipeIds = data.slice(0, 4).map((r: any) => r.id);
+    const mealsBasic = filterData.meals.slice(0, 4);
 
+    // 2) Seçilen tariflerin detaylarını al
     const detailResponses = await Promise.all(
-      recipeIds.map((id: number) =>
+      mealsBasic.map((m: any) =>
         fetch(
-          `https://api.spoonacular.com/recipes/${id}/information?includeNutrition=true&apiKey=${SPOONACULAR_API_KEY}`,
+          `https://www.themealdb.com/api/json/v1/1/lookup.php?i=${encodeURIComponent(
+            m.idMeal,
+          )}`,
         ),
       ),
     );
 
-    const detailData = await Promise.all(detailResponses.map((res) => res.json()));
+    const detailJsons = await Promise.all(detailResponses.map((r) => r.json()));
+    const mealDetails = detailJsons
+      .map((d) => (Array.isArray(d.meals) ? d.meals[0] : null))
+      .filter(Boolean);
 
-    // 3) Spoonacular'dan gelen tarifleri uygulamanın formatına dönüştür
     const userIngredientsLower = userIngredientsList.map((i) => i.toLowerCase());
 
-    const recipes = detailData.map((detail: any, index: number) => {
-      const basic = data[index];
+    // USDA FoodData Central'dan makro bilgileri getir
+    async function fetchNutritionFromUSDA(mealName: string) {
+      if (!USDA_API_KEY) {
+        return {
+          protein: "N/A",
+          carbohydrate: "N/A",
+          fat: "N/A",
+        };
+      }
 
-      // Mutfak türünü belirle
-      const cuisine = detail.cuisines?.[0]
-        ? detail.cuisines[0].charAt(0).toUpperCase() +
-          detail.cuisines[0].slice(1) +
-          " Mutfağı"
-        : "Dünya Mutfağı";
+      try {
+        const searchUrl = new URL("https://api.nal.usda.gov/fdc/v1/foods/search");
+        searchUrl.searchParams.append("api_key", USDA_API_KEY);
+        searchUrl.searchParams.append("query", mealName);
+        searchUrl.searchParams.append("pageSize", "1");
 
-      // Malzeme listesi
-      const extendedIngredients = Array.isArray(detail.extendedIngredients)
-        ? detail.extendedIngredients
-        : [];
+        const usdaRes = await fetch(searchUrl.toString());
+        if (!usdaRes.ok) {
+          const txt = await usdaRes.text();
+          console.error("USDA search error:", usdaRes.status, txt);
+          return {
+            protein: "N/A",
+            carbohydrate: "N/A",
+            fat: "N/A",
+          };
+        }
 
-      const ingredientsList = extendedIngredients.map((ing: any) => {
-        const name = ing.originalString || ing.name || "";
-        const ingLower = name.toLowerCase();
-        const ingWords = ingLower
-          .split(/[^a-z0-9ığüşöçİĞÜŞÖÇ]+/i)
-          .filter(Boolean);
+        const usdaData = await usdaRes.json();
 
-        const isAvailable = userIngredientsLower.some((userIng) => {
-          const userWords = userIng.split(/\s+/).filter(Boolean);
-          return (
-            userWords.length > 0 &&
-            userWords.every(
-              (word) =>
-                ingWords.includes(word) || ingWords.some((w) => w.startsWith(word)),
-            )
+        const food =
+          Array.isArray(usdaData.foods) && usdaData.foods.length > 0
+            ? usdaData.foods[0]
+            : null;
+        if (!food || !Array.isArray(food.foodNutrients)) {
+          return {
+            protein: "N/A",
+            carbohydrate: "N/A",
+            fat: "N/A",
+          };
+        }
+
+        const getVal = (names: string[]) => {
+          const n = food.foodNutrients.find((fn: any) =>
+            names.some((name) => fn.nutrientName?.toLowerCase().includes(name.toLowerCase())),
           );
-        });
+          if (!n || typeof n.value !== "number") return "N/A";
+          return `${Math.round(n.value)}g`;
+        };
 
         return {
-          name,
-          available: isAvailable,
+          protein: getVal(["Protein"]),
+          carbohydrate: getVal(["Carbohydrate", "Carbohydrates, by difference"]),
+          fat: getVal(["Total lipid (fat)", "Fat"]),
         };
-      });
+      } catch (e) {
+        console.error("USDA fetch error:", e);
+        return {
+          protein: "N/A",
+          carbohydrate: "N/A",
+          fat: "N/A",
+        };
+      }
+    }
 
-      // Hazırlama adımları
-      const steps =
-        detail.analyzedInstructions?.[0]?.steps &&
-        Array.isArray(detail.analyzedInstructions[0].steps)
-          ? detail.analyzedInstructions[0].steps.map((s: any) => s.step).filter(Boolean)
-          : [];
+    // 3) Uygulamanın recipe formatına dönüştür
+    const recipes = await Promise.all(
+      mealDetails.map(async (meal: any) => {
+        const title = meal.strMeal as string;
+        const cuisine = meal.strArea ? `${meal.strArea} Mutfağı` : "Dünya Mutfağı";
 
-      const preparation =
-        steps.length > 0
-          ? steps
-          : [
-              "Fırını/ocağı tarifte belirtilen sıcaklığa getirin.",
-              "Malzemeleri hazırlayın ve doğrayın.",
-              "Tarif talimatlarına göre pişirin.",
-              "Servis edin.",
-            ];
+        const ingredientsList: { name: string; available: boolean }[] = [];
+        for (let i = 1; i <= 20; i++) {
+          const ing = meal[`strIngredient${i}`];
+          const measure = meal[`strMeasure${i}`];
+          if (ing && ing.toString().trim()) {
+            const name = `${(measure || "").toString().trim()} ${ing.toString().trim()}`.trim();
+            const ingLower = name.toLowerCase();
+            const ingWords = ingLower
+              .split(/[^a-z0-9ığüşöçİĞÜŞÖÇ]+/i)
+              .filter(Boolean);
 
-      // Beslenme bilgileri
-      const nutrients = Array.isArray(detail.nutrition?.nutrients)
-        ? detail.nutrition.nutrients
-        : [];
+            const isAvailable = userIngredientsLower.some((userIng) => {
+              const userWords = userIng.split(/\s+/).filter(Boolean);
+              return (
+                userWords.length > 0 &&
+                userWords.every(
+                  (word) =>
+                    ingWords.includes(word) || ingWords.some((w) => w.startsWith(word)),
+                )
+              );
+            });
 
-      const getNutrient = (name: string) => {
-        const n = nutrients.find((nu: any) => nu.name === name);
-        if (!n || typeof n.amount !== "number") return "N/A";
-        const unit = n.unit || "g";
-        return `${Math.round(n.amount)}${unit}`;
-      };
+            ingredientsList.push({
+              name,
+              available: isAvailable,
+            });
+          }
+        }
 
-      const nutrition = {
-        protein: getNutrient("Protein"),
-        carbohydrate: getNutrient("Carbohydrates"),
-        fat: getNutrient("Fat"),
-      };
+        const instructionsRaw = (meal.strInstructions || "") as string;
+        const preparation = instructionsRaw
+          .split(/\r?\n/)
+          .map((s) => s.trim())
+          .filter(Boolean);
 
-      // Yanına ne gider (pairing) – basit bir açıklama
-      const dishType = detail.dishTypes?.[0];
-      const pairing = dishType
-        ? `Bu ${dishType} yanında hafif bir salata veya içecek ile servis edilebilir.`
-        : "Bu yemeği yan ürünler ve içeceklerle damak zevkinize göre eşleştirebilirsiniz.";
+        if (preparation.length === 0) {
+          preparation.push(
+            "Malzemeleri hazırlayın.",
+            "Tarif talimatlarına göre pişirin.",
+            "Servis edin.",
+          );
+        }
 
-      return {
-        cuisine,
-        title: detail.title || "Tarif",
-        ingredients: ingredientsList,
-        preparation,
-        nutrition,
-        pairing,
-        sourceUrl: detail.sourceUrl || detail.spoonacularSourceUrl || null,
-        image: detail.image || null,
-      };
-    });
+        const nutrition = await fetchNutritionFromUSDA(title);
+
+        const pairing =
+          "Bu yemeği yan ürünler ve içeceklerle damak zevkinize göre eşleştirebilirsiniz.";
+
+        return {
+          cuisine,
+          title,
+          ingredients: ingredientsList,
+          preparation,
+          nutrition,
+          pairing,
+          sourceUrl: meal.strSource || meal.strYoutube || null,
+          image: meal.strMealThumb || null,
+        };
+      }),
+    );
 
     return new Response(JSON.stringify({ recipes }), {
       status: 200,
