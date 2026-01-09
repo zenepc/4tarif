@@ -1,0 +1,185 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Turkish Kitchen Recipe App - Warm, Inviting Design System */
+
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=Inter:wght@300;400;500;600&display=swap');
+
+@layer base {
+  :root {
+    /* Light healthy green background */
+    --background: 120 30% 95%;
+    --foreground: 25 30% 15%;
+
+    /* Cards - clean white */
+    --card: 40 30% 99%;
+    --card-foreground: 25 30% 15%;
+
+    --popover: 40 30% 99%;
+    --popover-foreground: 25 30% 15%;
+
+    /* Terracotta primary */
+    --primary: 18 70% 50%;
+    --primary-foreground: 40 30% 99%;
+
+    /* Sage green secondary */
+    --secondary: 140 20% 90%;
+    --secondary-foreground: 140 30% 25%;
+
+    /* Muted warm tones */
+    --muted: 35 20% 92%;
+    --muted-foreground: 25 15% 45%;
+
+    /* Soft terracotta accent */
+    --accent: 25 50% 94%;
+    --accent-foreground: 18 60% 40%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 30 20% 88%;
+    --input: 30 20% 88%;
+    --ring: 18 70% 50%;
+
+    --radius: 0.75rem;
+
+    /* Custom recipe card tokens */
+    --recipe-card-shadow: 0 4px 20px -4px hsla(25, 30%, 15%, 0.08);
+    --recipe-card-hover-shadow: 0 8px 30px -6px hsla(25, 30%, 15%, 0.15);
+
+    /* Kitchen-inspired accent colors */
+    --herb-green: 140 35% 45%;
+    --warm-brown: 25 40% 30%;
+    --soft-orange: 30 80% 60%;
+    --cream-white: 40 40% 98%;
+
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+
+  .dark {
+    --background: 25 30% 8%;
+    --foreground: 40 20% 95%;
+
+    --card: 25 25% 12%;
+    --card-foreground: 40 20% 95%;
+
+    --popover: 25 25% 12%;
+    --popover-foreground: 40 20% 95%;
+
+    --primary: 18 70% 55%;
+    --primary-foreground: 25 30% 10%;
+
+    --secondary: 140 15% 20%;
+    --secondary-foreground: 140 20% 80%;
+
+    --muted: 25 20% 18%;
+    --muted-foreground: 30 15% 60%;
+
+    --accent: 25 30% 20%;
+    --accent-foreground: 25 50% 70%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 25 20% 20%;
+    --input: 25 20% 20%;
+    --ring: 18 70% 55%;
+
+    --herb-green: 140 30% 50%;
+    --warm-brown: 25 30% 50%;
+    --soft-orange: 30 70% 55%;
+    --cream-white: 40 20% 15%;
+
+    --sidebar-background: 240 5.9% 10%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-primary: 224.3 76.3% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 3.7% 15.9%;
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 240 3.7% 15.9%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Didot', 'Didot LT STD', 'Georgia', serif;
+  }
+}
+
+@layer components {
+  .recipe-card {
+    @apply bg-card rounded-xl p-6 transition-all duration-300 ease-out;
+    box-shadow: var(--recipe-card-shadow);
+  }
+
+  .recipe-card:hover {
+    box-shadow: var(--recipe-card-hover-shadow);
+    transform: translateY(-2px);
+  }
+}
+
+@layer utilities {
+  .text-display {
+    font-family: 'Playfair Display', serif;
+  }
+
+  .animate-fade-in-up {
+    animation: fadeInUp 0.5s ease-out forwards;
+    opacity: 0;
+  }
+
+  .animate-pulse-gentle {
+    animation: pulseGentle 2s ease-in-out infinite;
+  }
+
+  .animate-spin-slow {
+    animation: spin 3s linear infinite;
+  }
+
+  @keyframes fadeInUp {
+    from {
+      opacity: 0;
+      transform: translateY(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes pulseGentle {
+    0%, 100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.7;
+    }
+  }
+
+  @keyframes spin {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
+  }
+}
