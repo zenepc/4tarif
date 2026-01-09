@@ -5,7 +5,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import RecipeCard from "@/components/RecipeCard";
 import LoadingSpinner from "@/components/LoadingSpinner";
-import { supabase } from "@/integrations/supabase/client";
 
 interface RecipeIngredient {
   name: string;
@@ -40,13 +39,25 @@ const Index = () => {
     setRecipes([]);
 
     try {
-      const { data, error } = await supabase.functions.invoke("generate-recipes", {
-        body: { ingredients: ingredients.trim() },
+      const response = await fetch("/api/generate-recipes", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ ingredients: ingredients.trim() }),
       });
 
-      if (error) {
-        throw new Error(error.message || "Bir hata oluştu");
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        const message =
+          errorData?.error ||
+          (response.status === 429
+            ? "Çok fazla istek gönderildi. Lütfen biraz bekleyin."
+            : "Tarif oluşturulurken bir hata oluştu");
+        throw new Error(message);
       }
+
+      const data = await response.json();
 
       if (data?.recipes && Array.isArray(data.recipes)) {
         setRecipes(data.recipes);
